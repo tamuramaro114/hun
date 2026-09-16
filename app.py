@@ -20,19 +20,21 @@ def load_words():
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
 
-  # 文字コードエラーを防ぐため、いくつかのエンコーディングを順番に試す
+  # エラーを無視せず、各エンコーディングで厳密に読み込む
   df = None
   for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
     try:
       df = pd.read_csv(WORDS_CSV, encoding=enc)
-      break
-    except UnicodeDecodeError:
+      # もし文字化けしてカラムが変になっていないか簡易チェック
+      if len(df.columns) >= 3:
+        break
+    except Exception:
       continue
 
-  if df is None:
+  if df is None or df.empty:
     st.error(
-        "CSVファイルのエンコーディングを読み込めませんでした。UTF-8（BOM付きま"
-        "たは無し）で保存し直してください。"
+        "CSVファイルを読み込めませんでした。`words.csv` の文字コードを"
+        " **UTF-8** にして保存し直してください。"
     )
     return pd.DataFrame(
         columns=["korean", "reading", "japanese", "part_of_speech"]
@@ -47,7 +49,6 @@ def load_words():
     df["part_of_speech"] = "名詞"
     df.columns = ["korean", "reading", "japanese", "part_of_speech"]
   return df
-
 
 def load_stats():
   if not os.path.exists(STATS_CSV):
