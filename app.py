@@ -19,8 +19,25 @@ def load_words():
     return pd.DataFrame(
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
-  # ヘッダーなしの場合は header=None にし、列名を付与
-  df = pd.read_csv(WORDS_CSV)
+
+  # 文字コードエラーを防ぐため、いくつかのエンコーディングを順番に試す
+  df = None
+  for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
+    try:
+      df = pd.read_csv(WORDS_CSV, encoding=enc)
+      break
+    except UnicodeDecodeError:
+      continue
+
+  if df is None:
+    st.error(
+        "CSVファイルのエンコーディングを読み込めませんでした。UTF-8（BOM付きま"
+        "たは無し）で保存し直してください。"
+    )
+    return pd.DataFrame(
+        columns=["korean", "reading", "japanese", "part_of_speech"]
+    )
+
   # カラム数が足りない場合のフォールバック
   if len(df.columns) >= 4:
     df.columns = ["korean", "reading", "japanese", "part_of_speech"] + list(
@@ -58,10 +75,30 @@ def load_stats():
           "recent_accuracy": 0.0,
       })
     stats_df = pd.DataFrame(stats_data)
-    stats_df.to_csv(STATS_CSV, index=False)
+    stats_df.to_csv(STATS_CSV, index=False, encoding="utf-8-sig")
     return stats_df
 
-  stats_df = pd.read_csv(STATS_CSV)
+  # 統計CSV読み込みもエンコーディング考慮
+  stats_df = None
+  for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
+    try:
+      stats_df = pd.read_csv(STATS_CSV, encoding=enc)
+      break
+    except UnicodeDecodeError:
+      continue
+
+  if stats_df is None:
+    stats_df = pd.DataFrame(
+        columns=[
+            "korean",
+            "total_attempts",
+            "correct_attempts",
+            "accuracy",
+            "recent_results",
+            "recent_accuracy",
+        ]
+    )
+
   # 欠損値対策
   stats_df["recent_results"] = stats_df["recent_results"].fillna("")
   return stats_df
@@ -105,7 +142,7 @@ def update_stats(korean_word, is_correct):
     stats_df.loc[i, "recent_results"] = ",".join(map(str, recent_list))
     stats_df.loc[i, "recent_accuracy"] = round(recent_accuracy, 2)
 
-  stats_df.to_csv(STATS_CSV, index=False)
+  stats_df.to_csv(STATS_CSV, index=False, encoding="utf-8-sig")
 
 
 # --- メイン画面レイアウト ---
@@ -325,7 +362,9 @@ elif app_mode == "単語・成績一覧CSV":
 
   st.download_button(
       label="💾 統計データをCSVとしてダウンロード",
-      data=stats_df.to_csv(index=False).encode("utf-8"),
+      data=stats_df.to_csv(index=False, encoding="utf-8-sig").encode(
+          "utf-8-sig"
+      ),
       file_name="stats_export.csv",
       mime="text/csv",
   )
