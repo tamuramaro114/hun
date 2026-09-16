@@ -20,12 +20,10 @@ def load_words():
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
 
-  # エラーを無視せず、各エンコーディングで厳密に読み込む
   df = None
   for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
     try:
       df = pd.read_csv(WORDS_CSV, encoding=enc)
-      # もし文字化けしてカラムが変になっていないか簡易チェック
       if len(df.columns) >= 3:
         break
     except Exception:
@@ -50,9 +48,9 @@ def load_words():
     df.columns = ["korean", "reading", "japanese", "part_of_speech"]
   return df
 
+
 def load_stats():
   if not os.path.exists(STATS_CSV):
-    # 初期状態の統計CSVを作成
     words_df = load_words()
     if words_df.empty:
       return pd.DataFrame(
@@ -72,14 +70,13 @@ def load_stats():
           "total_attempts": 0,
           "correct_attempts": 0,
           "accuracy": 0.0,
-          "recent_results": "",  # 例: "1,0,1,1..." (直近の正誤をカンマ区切り、右側が直近)
+          "recent_results": "",
           "recent_accuracy": 0.0,
       })
     stats_df = pd.DataFrame(stats_data)
     stats_df.to_csv(STATS_CSV, index=False, encoding="utf-8-sig")
     return stats_df
 
-  # 統計CSV読み込みもエンコーディング考慮
   stats_df = None
   for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
     try:
@@ -101,7 +98,7 @@ def load_stats():
     )
 
   # 欠損値対策
-  stats_df["recent_results"] = stats_df["recent_results"].fillna("")
+  stats_df["recent_results"] = stats_df["recent_results"].fillna("").astype(str)
   return stats_df
 
 
@@ -110,7 +107,6 @@ def update_stats(korean_word, is_correct):
   idx = stats_df[stats_df["korean"] == korean_word].index
 
   if len(idx) == 0:
-    # 新規追加が必要な場合
     new_row = pd.DataFrame([{
         "korean": korean_word,
         "total_attempts": 1,
@@ -126,9 +122,18 @@ def update_stats(korean_word, is_correct):
     correct = int(stats_df.loc[i, "correct_attempts"]) + (1 if is_correct else 0)
     accuracy = (correct / total) * 100.0
 
-    # 直近履歴の更新 (最大10個)
+    # 直近履歴の安全な取得と更新 (最大10個)
     recent_str = str(stats_df.loc[i, "recent_results"])
-    recent_list = [int(x) for x in recent_str.split(",")] if recent_str else []
+    recent_list = []
+    if recent_str and recent_str.lower() != "nan":
+      for x in recent_str.split(","):
+        x = x.strip()
+        try:
+          if x != "":
+            recent_list.append(int(float(x)))
+        except ValueError:
+          continue
+
     recent_list.append(1 if is_correct else 0)
     if len(recent_list) > 10:
       recent_list = recent_list[-10:]
@@ -164,7 +169,6 @@ app_mode = st.sidebar.radio("メニュー", ["クイズを解く", "単語・成
 if app_mode == "クイズを解く":
   st.sidebar.subheader("出題範囲・順番の設定")
 
-  # 品詞などの絞り込み
   all_pos = (
       ["すべて"] + list(words_df["part_of_speech"].dropna().unique())
       if "part_of_speech" in words_df.columns
@@ -177,7 +181,6 @@ if app_mode == "クイズを解く":
   else:
     filtered_words_df = words_df
 
-  # 順番・出題方式
   order_mode = st.sidebar.selectbox(
       "出題順序",
       [
@@ -191,7 +194,6 @@ if app_mode == "クイズを解く":
 
   stats_df = load_stats()
 
-  # 統計情報をマージして並び替えに利用
   merged_df = pd.merge(filtered_words_df, stats_df, on="korean", how="left")
   merged_df["accuracy"] = merged_df["accuracy"].fillna(0.0)
   merged_df["recent_accuracy"] = merged_df["recent_accuracy"].fillna(0.0)
@@ -208,14 +210,13 @@ if app_mode == "クイズを解く":
     ).reset_index(drop=True)
   elif order_mode == "昇順 (CSVの順)":
     quiz_pool = merged_df.reset_index(drop=True)
-  else:  # 降順
+  else:
     quiz_pool = merged_df.iloc[::-1].reset_index(drop=True)
 
   if quiz_pool.empty:
     st.warning("選択された条件に一致する単語がありません。")
     st.stop()
 
-  # セッションステート初期化
   if "quiz_index" not in st.session_state:
     st.session_state.quiz_index = 0
   if "selected_answer" not in st.session_state:
@@ -223,7 +224,6 @@ if app_mode == "クイズを解く":
   if "is_answered" not in st.session_state:
     st.session_state.is_answered = False
 
-  # インデックスの安全確認
   if st.session_state.quiz_index >= len(quiz_pool):
     st.session_state.quiz_index = 0
 
@@ -239,7 +239,6 @@ if app_mode == "クイズを解く":
       f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
   )
 
-  # 4択の選択肢作成（正解1つ + ダミー3つ）
   if "current_choices" not in st.session_state or st.session_state.get(
       "current_target"
   ) != target_korean:
@@ -257,9 +256,7 @@ if app_mode == "クイズを解く":
 
   choices = st.session_state.current_choices
 
-  # フォームやボタンでの解答処理
   with st.form(key="quiz_form"):
-    # 選択肢には読みを含めない
     user_choice = st.radio(
         "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
     )
@@ -274,7 +271,6 @@ if app_mode == "クイズを解く":
       update_stats(target_korean, is_correct)
       st.rerun()
 
-  # 解答後のフィードバック表示
   if st.session_state.is_answered:
     if st.session_state.selected_answer == target_japanese:
       st.success("🎉 正解です！")
@@ -283,7 +279,6 @@ if app_mode == "クイズを解く":
           f"❌ 残念！不正解です。正解は **「{target_japanese}」** です。"
       )
 
-    # 解説に読みを含める
     st.info(f"📖 **解説**: `{target_korean}` の読みは **[{target_reading}]** です。")
 
     col1, col2 = st.columns(2)
@@ -306,14 +301,12 @@ elif app_mode == "単語・成績一覧CSV":
   st.subheader("📊 単語リスト & 成績・正答率一覧")
   stats_df = load_stats()
 
-  # 統合データの作成
   combined_df = pd.merge(words_df, stats_df, on="korean", how="left")
   combined_df["accuracy"] = combined_df["accuracy"].fillna(0.0)
   combined_df["recent_accuracy"] = combined_df["recent_accuracy"].fillna(0.0)
   combined_df["total_attempts"] = combined_df["total_attempts"].fillna(0).astype(int)
   combined_df["correct_attempts"] = combined_df["correct_attempts"].fillna(0).astype(int)
 
-  # 並び替えオプション
   sort_by = st.selectbox(
       "並び替え基準",
       [
@@ -337,7 +330,6 @@ elif app_mode == "単語・成績一覧CSV":
   elif sort_by == "解答回数が多い順":
     combined_df = combined_df.sort_values(by="total_attempts", ascending=False)
 
-  # 表示用に列名を日本語化
   display_df = combined_df[[
       "korean",
       "reading",
