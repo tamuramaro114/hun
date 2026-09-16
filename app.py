@@ -21,12 +21,9 @@ def load_words():
     )
 
   df = None
-  # 確実にUTF-8で読み込ませるための強制トライ
   for enc in ["utf-8-sig", "utf-8"]:
     try:
-      # まずヘッダーがある前提で読み込む
       temp_df = pd.read_csv(WORDS_CSV, encoding=enc)
-      # もし1行目がヘッダーっぽくなく韓国語（ハングル）を含んでいる等のチェック
       if not temp_df.empty:
         df = temp_df
         break
@@ -34,7 +31,6 @@ def load_words():
       continue
 
   if df is None or df.empty:
-    # 最後の手段としてcp932も試す
     try:
       df = pd.read_csv(WORDS_CSV, encoding="cp932")
     except Exception:
@@ -49,11 +45,7 @@ def load_words():
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
 
-  # カラム名の正規化（列が4つ以上ある場合、あるいはヘッダーがない場合のフォールバック）
   cols = list(df.columns)
-  # もし1行目に日本語や英語のヘッダーではなく、いきなりハングル（노래など）が入っている場合の救済
-  first_val = str(cols[0])
-  # ヘッダー行がないと判定される場合の対応（必要に応じて自動調整）
   if len(cols) >= 4:
     df.columns = [
         "korean",
@@ -64,11 +56,7 @@ def load_words():
   elif len(cols) == 3:
     df["part_of_speech"] = "名詞"
     df.columns = ["korean", "reading", "japanese", "part_of_speech"]
-  else:
-    # 3未満などの異常時
-    pass
 
-  # 文字列型に強制変換して「?」化を防ぐ
   for c in ["korean", "reading", "japanese", "part_of_speech"]:
     if c in df.columns:
       df[c] = df[c].astype(str)
@@ -179,7 +167,6 @@ def update_stats(korean_word, is_correct):
 # --- メイン画面レイアウト ---
 st.title("🇰🇷 韓国語 4択クイズアプリ")
 
-# キャッシュを手動クリアできるようにするボタンをサイドバーに配置
 if st.sidebar.button("🔄 キャッシュをクリアして再読み込み"):
   st.cache_data.clear()
   st.rerun()
@@ -269,7 +256,7 @@ if app_mode == "クイズを解く":
       f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
   )
 
-  # 4択の選択肢作成（正解1つ + ダミー3つ）
+  # 4択の選択肢作成
   if "current_choices" not in st.session_state or st.session_state.get(
       "current_target"
   ) != target_korean:
@@ -290,22 +277,34 @@ if app_mode == "クイズを解く":
 
   choices = st.session_state.current_choices
 
-  with st.form(key="quiz_form"):
-    user_choice = st.radio(
-        "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
-    )
-    submit_button = st.form_submit_button(
-        label="回答する", disabled=st.session_state.is_answered
+  # 未回答のときは選択肢と回答ボタンを表示
+  if not st.session_state.is_answered:
+    with st.form(key="quiz_form"):
+      user_choice = st.radio(
+          "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
+      )
+      submit_button = st.form_submit_button(label="回答する")
+
+      if submit_button:
+        st.session_state.is_answered = True
+        st.session_state.selected_answer = user_choice
+        is_correct = user_choice == target_japanese
+        update_stats(target_korean, is_correct)
+        st.rerun()
+
+  # 回答済みのときは、結果（正解/不正解）と解説、次の問題へのボタンを表示
+  else:
+    # ユーザーが選んだ選択肢をラジオボタン風にそのまま表示しておく
+    st.radio(
+        "選択肢:",
+        choices,
+        index=choices.index(st.session_state.selected_answer)
+        if st.session_state.selected_answer in choices
+        else 0,
+        disabled=True,
+        key=f"disabled_radio_{st.session_state.quiz_index}",
     )
 
-    if submit_button:
-      st.session_state.is_answered = True
-      st.session_state.selected_answer = user_choice
-      is_correct = user_choice == target_japanese
-      update_stats(target_korean, is_correct)
-      st.rerun()
-
-  if st.session_state.is_answered:
     if st.session_state.selected_answer == target_japanese:
       st.success("🎉 正解です！")
     else:
@@ -317,11 +316,11 @@ if app_mode == "クイズを解く":
 
     col1, col2 = st.columns(2)
     with col1:
-      if st.button("次の問題へ ➡️"):
+      if st.button("次の問題へ ➡️", type="primary"):
         st.session_state.quiz_index = (st.session_state.quiz_index + 1) % len(
             quiz_pool
         )
-        st.session_state.is_answered = None
+        st.session_state.is_answered = False
         st.session_state.current_target = None
         st.rerun()
     with col2:
