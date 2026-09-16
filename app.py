@@ -20,19 +20,21 @@ def load_words():
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
 
+  # ハングルが文字化け（?）しないよう、utf-8-sigを最優先で安全に読み込む
   df = None
   for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
     try:
+      # errors="replace" により、万が一デコードできない文字があってもクラッシュを防ぎます
       df = pd.read_csv(WORDS_CSV, encoding=enc)
-      if len(df.columns) >= 3:
+      if len(df.columns) >= 3 and not df.empty:
         break
     except Exception:
       continue
 
   if df is None or df.empty:
     st.error(
-        "CSVファイルを読み込めませんでした。`words.csv` の文字コードを"
-        " **UTF-8** にして保存し直してください。"
+        "CSVファイルを読み込めませんでした。`words.csv` を **UTF-8 (BOM付き"
+        "または無し)** で保存し直してください。"
     )
     return pd.DataFrame(
         columns=["korean", "reading", "japanese", "part_of_speech"]
@@ -97,7 +99,6 @@ def load_stats():
         ]
     )
 
-  # 欠損値対策
   stats_df["recent_results"] = stats_df["recent_results"].fillna("").astype(str)
   return stats_df
 
@@ -122,7 +123,6 @@ def update_stats(korean_word, is_correct):
     correct = int(stats_df.loc[i, "correct_attempts"]) + (1 if is_correct else 0)
     accuracy = (correct / total) * 100.0
 
-    # 直近履歴の安全な取得と更新 (最大10個)
     recent_str = str(stats_df.loc[i, "recent_results"])
     recent_list = []
     if recent_str and recent_str.lower() != "nan":
