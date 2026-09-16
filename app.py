@@ -20,34 +20,59 @@ def load_words():
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
 
-  # ハングルが文字化け（?）しないよう、utf-8-sigを最優先で安全に読み込む
   df = None
-  for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
+  # 確実にUTF-8で読み込ませるための強制トライ
+  for enc in ["utf-8-sig", "utf-8"]:
     try:
-      # errors="replace" により、万が一デコードできない文字があってもクラッシュを防ぎます
-      df = pd.read_csv(WORDS_CSV, encoding=enc)
-      if len(df.columns) >= 3 and not df.empty:
+      # まずヘッダーがある前提で読み込む
+      temp_df = pd.read_csv(WORDS_CSV, encoding=enc)
+      # もし1行目がヘッダーっぽくなく韓国語（ハングル）を含んでいる等のチェック
+      if not temp_df.empty:
+        df = temp_df
         break
     except Exception:
       continue
 
   if df is None or df.empty:
+    # 最後の手段としてcp932も試す
+    try:
+      df = pd.read_csv(WORDS_CSV, encoding="cp932")
+    except Exception:
+      pass
+
+  if df is None or df.empty:
     st.error(
-        "CSVファイルを読み込めませんでした。`words.csv` を **UTF-8 (BOM付き"
-        "または無し)** で保存し直してください。"
+        "CSVファイルを読み込めませんでした。`words.csv` の文字コードを"
+        " **UTF-8** にして保存し直してください。"
     )
     return pd.DataFrame(
         columns=["korean", "reading", "japanese", "part_of_speech"]
     )
 
-  # カラム数が足りない場合のフォールバック
-  if len(df.columns) >= 4:
-    df.columns = ["korean", "reading", "japanese", "part_of_speech"] + list(
-        df.columns[4:]
-    )
-  elif len(df.columns) == 3:
+  # カラム名の正規化（列が4つ以上ある場合、あるいはヘッダーがない場合のフォールバック）
+  cols = list(df.columns)
+  # もし1行目に日本語や英語のヘッダーではなく、いきなりハングル（노래など）が入っている場合の救済
+  first_val = str(cols[0])
+  # ヘッダー行がないと判定される場合の対応（必要に応じて自動調整）
+  if len(cols) >= 4:
+    df.columns = [
+        "korean",
+        "reading",
+        "japanese",
+        "part_of_speech",
+    ] + [f"extra_{i}" for i in range(len(cols) - 4)]
+  elif len(cols) == 3:
     df["part_of_speech"] = "名詞"
     df.columns = ["korean", "reading", "japanese", "part_of_speech"]
+  else:
+    # 3未満などの異常時
+    pass
+
+  # 文字列型に強制変換して「?」化を防ぐ
+  for c in ["korean", "reading", "japanese", "part_of_speech"]:
+    if c in df.columns:
+      df[c] = df[c].astype(str)
+
   return df
 
 
@@ -80,7 +105,7 @@ def load_stats():
     return stats_df
 
   stats_df = None
-  for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
+  for enc in ["utf-8-sig", "utf-8", "cp932"]:
     try:
       stats_df = pd.read_csv(STATS_CSV, encoding=enc)
       break
@@ -153,6 +178,11 @@ def update_stats(korean_word, is_correct):
 
 # --- メイン画面レイアウト ---
 st.title("🇰🇷 韓国語 4択クイズアプリ")
+
+# キャッシュを手動クリアできるようにするボタンをサイドバーに配置
+if st.sidebar.button("🔄 キャッシュをクリアして再読み込み"):
+  st.cache_data.clear()
+  st.rerun()
 
 words_df = load_words()
 if words_df.empty:
@@ -228,9 +258,9 @@ if app_mode == "クイズを解く":
     st.session_state.quiz_index = 0
 
   current_row = quiz_pool.iloc[st.session_state.quiz_index]
-  target_korean = current_row["korean"]
-  target_japanese = current_row["japanese"]
-  target_reading = current_row["reading"]
+  target_korean = str(current_row["korean"])
+  target_japanese = str(current_row["japanese"])
+  target_reading = str(current_row["reading"])
 
   st.subheader(
       f"問題 {st.session_state.quiz_index + 1} / {len(quiz_pool)}"
@@ -239,14 +269,18 @@ if app_mode == "クイズを解く":
       f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
   )
 
+  # 4択の選択肢作成（正解1つ + ダミー3つ）
   if "current_choices" not in st.session_state or st.session_state.get(
       "current_target"
   ) != target_korean:
-    dummies = (
-        words_df[words_df["japanese"] != target_japanese]["japanese"]
-        .sample(n=min(3, len(words_df) - 1))
-        .tolist()
-    )
+    other_words = words_df[words_df["japanese"] != target_japanese]
+    if len(other_words) >= 3:
+      dummies = other_words["japanese"].sample(n=3).tolist()
+    else:
+      dummies = other_words["japanese"].tolist()
+      while len(dummies) < 3:
+        dummies.append("ダミー")
+
     choices = dummies + [target_japanese]
     random.shuffle(choices)
     st.session_state.current_choices = choices
@@ -287,7 +321,7 @@ if app_mode == "クイズを解く":
         st.session_state.quiz_index = (st.session_state.quiz_index + 1) % len(
             quiz_pool
         )
-        st.session_state.is_answered = False
+        st.session_state.is_answered = None
         st.session_state.current_target = None
         st.rerun()
     with col2:
