@@ -169,6 +169,8 @@ st.title("🇰🇷 韓国語 4択クイズアプリ")
 
 if st.sidebar.button("🔄 キャッシュをクリアして再読み込み"):
   st.cache_data.clear()
+  if "quiz_pool" in st.session_state:
+    del st.session_state.quiz_pool
   st.rerun()
 
 words_df = load_words()
@@ -193,15 +195,10 @@ if app_mode == "クイズを解く":
   )
   selected_pos = st.sidebar.selectbox("品詞で絞り込み", all_pos)
 
-  if selected_pos != "すべて":
-    filtered_words_df = words_df[words_df["part_of_speech"] == selected_pos]
-  else:
-    filtered_words_df = words_df
-
   order_mode = st.sidebar.selectbox(
       "出題順序",
       [
-          "ランダム",
+          "ランダム (指定範囲から)",
           "正答率が低い順 (全体)",
           "直近正答率が低い順 (直近10回)",
           "昇順 (CSVの順)",
@@ -209,29 +206,62 @@ if app_mode == "クイズを解く":
       ],
   )
 
-  stats_df = load_stats()
+  # 条件（品詞や順番）が変わったときにプールをリセットするための判定キー
+  current_settings_key = f"{selected_pos}_{order_mode}"
+  if st.session_state.get("last_settings_key") != current_settings_key:
+    st.session_state.last_settings_key = current_settings_key
+    if "quiz_pool" in st.session_state:
+      del st.session_state.quiz_pool
+    if "quiz_index" in st.session_state:
+      st.session_state.quiz_index = 0
+    if "is_answered" in st.session_state:
+      st.session_state.is_answered = False
+    if "current_target" in st.session_state:
+      st.session_state.current_target = None
 
-  merged_df = pd.merge(filtered_words_df, stats_df, on="korean", how="left")
-  merged_df["accuracy"] = merged_df["accuracy"].fillna(0.0)
-  merged_df["recent_accuracy"] = merged_df["recent_accuracy"].fillna(0.0)
+  # クイズの出題プールがまだ作成されていない場合のみ作成してセッションに保持する
+  if "quiz_pool" not in st.session_state:
+    if selected_pos != "すべて":
+      filtered_words_df = words_df[words_df["part_of_speech"] == selected_pos]
+    else:
+      filtered_words_df = words_df
 
-  if order_mode == "ランダム":
-    quiz_pool = merged_df.sample(frac=1).reset_index(drop=True)
-  elif order_mode == "正答率が低い順 (全体)":
-    quiz_pool = merged_df.sort_values(by="accuracy", ascending=True).reset_index(
-        drop=True
-    )
-  elif order_mode == "直近正答率が低い順 (直近10回)":
-    quiz_pool = merged_df.sort_values(
-        by="recent_accuracy", ascending=True
-    ).reset_index(drop=True)
-  elif order_mode == "昇順 (CSVの順)":
-    quiz_pool = merged_df.reset_index(drop=True)
-  else:
-    quiz_pool = merged_df.iloc[::-1].reset_index(drop=True)
+    stats_df = load_stats()
+    merged_df = pd.merge(filtered_words_df, stats_df, on="korean", how="left")
+    merged_df["accuracy"] = merged_df["accuracy"].fillna(0.0)
+    merged_df["recent_accuracy"] = merged_df["recent_accuracy"].fillna(0.0)
+
+    if order_mode == "ランダム (指定範囲から)":
+      quiz_pool = merged_df.sample(frac=1).reset_index(drop=True)
+    elif order_mode == "正答率が低い順 (全体)":
+      quiz_pool = merged_df.sort_values(
+          by="accuracy", ascending=True
+      ).reset_index(drop=True)
+    elif order_mode == "直近正答率が低い順 (直近10回)":
+      quiz_pool = merged_df.sort_values(
+          by="recent_accuracy", ascending=True
+      ).reset_index(drop=True)
+    elif order_mode == "昇順 (CSVの順)":
+      quiz_pool = merged_df.reset_index(drop=True)
+    else:
+      quiz_pool = merged_df.iloc[::-1].reset_index(drop=True)
+
+    st.session_state.quiz_pool = quiz_pool
+    st.session_state.quiz_index = 0
+    st.session_state.is_answered = False
+    st.session_state.current_target = None
+
+  quiz_pool = st.session_state.quiz_pool
 
   if quiz_pool.empty:
-    st.warning("選択された条件に一致する単語がありません。")
+    st.warning(
+        "選択された条件（品詞など）に一致する単語がありません。別の条件を選んでく"
+        "ださい。"
+    )
+    if st.button("設定をリセット"):
+      if "quiz_pool" in st.session_state:
+        del st.session_state.quiz_pool
+      st.rerun()
     st.stop()
 
   if "quiz_index" not in st.session_state:
@@ -279,7 +309,7 @@ if app_mode == "クイズを解く":
 
   # 未回答のときは選択肢と回答ボタンを表示
   if not st.session_state.is_answered:
-    with st.form(key="quiz_form"):
+    with st.form(key=f"quiz_form_{st.session_state.quiz_index}"):
       user_choice = st.radio(
           "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
       )
@@ -294,7 +324,6 @@ if app_mode == "クイズを解く":
 
   # 回答済みのときは、結果（正解/不正解）と解説、次の問題へのボタンを表示
   else:
-    # ユーザーが選んだ選択肢をラジオボタン風にそのまま表示しておく
     st.radio(
         "選択肢:",
         choices,
@@ -314,7 +343,7 @@ if app_mode == "クイズを解く":
 
     st.info(f"📖 **解説**: `{target_korean}` の読みは **[{target_reading}]** です。")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
       if st.button("次の問題へ ➡️", type="primary"):
         st.session_state.quiz_index = (st.session_state.quiz_index + 1) % len(
@@ -324,6 +353,14 @@ if app_mode == "クイズを解く":
         st.session_state.current_target = None
         st.rerun()
     with col2:
+      if st.button("🔀 リストを再シャッフル"):
+        if "quiz_pool" in st.session_state:
+          del st.session_state.quiz_pool
+        st.session_state.quiz_index = 0
+        st.session_state.is_answered = False
+        st.session_state.current_target = None
+        st.rerun()
+    with col3:
       if st.button("🔄 最初からやり直す"):
         st.session_state.quiz_index = 0
         st.session_state.is_answered = False
