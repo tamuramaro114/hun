@@ -206,25 +206,59 @@ if app_mode == "クイズを解く":
       ],
   )
 
-  # 条件（品詞や順番）が変わったときにプールをリセットするための判定キー
-  current_settings_key = f"{selected_pos}_{order_mode}"
+  # --- 新規追加：行番号による出題範囲指定 ---
+  total_rows = len(words_df)
+  st.sidebar.markdown("---")
+  st.sidebar.markdown(f"**📝 CSV行番号の範囲指定** (全 {total_rows} 件)")
+  use_range = st.sidebar.checkbox("範囲を指定して出題する", value=False)
+
+  start_idx = 1
+  end_idx = total_rows
+  if use_range:
+    col_a, col_b = st.sidebar.columns(2)
+    with col_a:
+      start_idx = st.number_input(
+          "開始行", min_value=1, max_value=total_rows, value=1
+      )
+    with col_b:
+      end_idx = st.number_input(
+          "終了行",
+          min_value=1,
+          max_value=total_rows,
+          value=min(50, total_rows),
+      )
+    if start_idx > end_idx:
+      st.sidebar.error("開始行は終了行以下にしてください。")
+
+  # 条件が変わったときにプールをリセットするためのキー
+  current_settings_key = f"{selected_pos}_{order_mode}_{use_range}_{start_idx}_{end_idx}"
   if st.session_state.get("last_settings_key") != current_settings_key:
     st.session_state.last_settings_key = current_settings_key
-    if "quiz_pool" in st.session_state:
-      del st.session_state.quiz_pool
-    if "quiz_index" in st.session_state:
-      st.session_state.quiz_index = 0
-    if "is_answered" in st.session_state:
-      st.session_state.is_answered = False
-    if "current_target" in st.session_state:
-      st.session_state.current_target = None
+    for key in [
+        "quiz_pool",
+        "quiz_index",
+        "is_answered",
+        "current_target",
+        "selected_answer",
+    ]:
+      if key in st.session_state:
+        del st.session_state[key]
+    st.rerun()
 
-  # クイズの出題プールがまだ作成されていない場合のみ作成してセッションに保持する
+  # クイズの出題プール作成
   if "quiz_pool" not in st.session_state:
+    # 行番号によるスライス (1始まりを0始まりインデックスに変換)
+    target_df = words_df.copy()
+    if use_range:
+      s_idx = max(0, int(start_idx) - 1)
+      e_idx = min(len(target_df), int(end_idx))
+      target_df = target_df.iloc[s_idx:e_idx]
+
+    # 品詞フィルター
     if selected_pos != "すべて":
-      filtered_words_df = words_df[words_df["part_of_speech"] == selected_pos]
+      filtered_words_df = target_df[target_df["part_of_speech"] == selected_pos]
     else:
-      filtered_words_df = words_df
+      filtered_words_df = target_df
 
     stats_df = load_stats()
     merged_df = pd.merge(filtered_words_df, stats_df, on="korean", how="left")
@@ -255,8 +289,7 @@ if app_mode == "クイズを解く":
 
   if quiz_pool.empty:
     st.warning(
-        "選択された条件（品詞など）に一致する単語がありません。別の条件を選んでく"
-        "ださい。"
+        "選択された条件や範囲に一致する単語がありません。設定を変更してください。"
     )
     if st.button("設定をリセット"):
       if "quiz_pool" in st.session_state:
@@ -307,22 +340,24 @@ if app_mode == "クイズを解く":
 
   choices = st.session_state.current_choices
 
-  # 未回答のときは選択肢と回答ボタンを表示
+  # 未回答のとき
   if not st.session_state.is_answered:
-    with st.form(key=f"quiz_form_{st.session_state.quiz_index}"):
-      user_choice = st.radio(
-          "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
-      )
-      submit_button = st.form_submit_button(label="回答する")
+    # ラジオボタンで選択肢を保持
+    user_choice = st.radio(
+        "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
+    )
 
-      if submit_button:
+    col_btn1, col_btn2 = st.columns([1, 4])
+    with col_btn1:
+      # ボタン押下で確実に回答処理を実行
+      if st.button("回答する", type="primary", key="submit_btn_direct"):
         st.session_state.is_answered = True
         st.session_state.selected_answer = user_choice
         is_correct = user_choice == target_japanese
         update_stats(target_korean, is_correct)
         st.rerun()
 
-  # 回答済みのときは、結果（正解/不正解）と解説、次の問題へのボタンを表示
+  # 回答済みのとき
   else:
     st.radio(
         "選択肢:",
@@ -345,7 +380,9 @@ if app_mode == "クイズを解く":
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-      if st.button("次の問題へ ➡️", type="primary"):
+      if st.button(
+          "次の問題へ ➡️", type="primary", key="next_btn_direct"
+      ):
         st.session_state.quiz_index = (st.session_state.quiz_index + 1) % len(
             quiz_pool
         )
@@ -353,7 +390,7 @@ if app_mode == "クイズを解く":
         st.session_state.current_target = None
         st.rerun()
     with col2:
-      if st.button("🔀 リストを再シャッフル"):
+      if st.button("🔀 リストを再シャッフル", key="reshuffle_btn"):
         if "quiz_pool" in st.session_state:
           del st.session_state.quiz_pool
         st.session_state.quiz_index = 0
@@ -361,7 +398,7 @@ if app_mode == "クイズを解く":
         st.session_state.current_target = None
         st.rerun()
     with col3:
-      if st.button("🔄 最初からやり直す"):
+      if st.button("🔄 最初からやり直す", key="reset_btn"):
         st.session_state.quiz_index = 0
         st.session_state.is_answered = False
         st.session_state.current_target = None
