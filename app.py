@@ -317,6 +317,9 @@ if app_mode == "クイズを解く":
   st.markdown(
       f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
   )
+  st.caption(
+      "💡 **キーボード操作**: `1`～`4`キーで選択、`5`キーで回答／次へ、`6`キーで再シャッフル"
+  )
 
   # 4択の選択肢作成
   if "current_choices" not in st.session_state or st.session_state.get(
@@ -342,51 +345,47 @@ if app_mode == "クイズを解く":
   # 未回答のとき
   if not st.session_state.is_answered:
     user_choice = st.radio(
-        "選択肢 (キーボードの [1]～[4] で選択):",
-        choices,
-        key=f"radio_{st.session_state.quiz_index}",
+        "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
     )
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
-      if st.button("回答する", type="primary", key="submit_btn_direct"):
+      if st.button("回答する [5]", type="primary", key="submit_btn_direct"):
         st.session_state.is_answered = True
         st.session_state.selected_answer = user_choice
         is_correct = user_choice == target_japanese
         update_stats(target_korean, is_correct)
         st.rerun()
 
-    # キーボードショートカット：メイン画面のラジオボタン（選択肢）専用に1〜4を割り当て
+    # キーボードショートカット (1〜4で選択肢、5で回答、Enterでも回答)
     components.html(
         """
         <script>
         const doc = window.parent.document;
         function handleKeyDown(e) {
+            // 入力フォーム等にフォーカスがある場合は無視
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
             
-            // メインコンテンツエリア内にあるラジオボタンのみを対象にする
-            const mainContainer = doc.querySelector('.main');
-            if (!mainContainer) return;
+            // メインコンテンツエリア内のラジオボタンのみを対象にする（サイドバー除外）
+            const mainContent = doc.querySelector('.main');
+            const radios = mainContent ? mainContent.querySelectorAll('input[type="radio"]') : doc.querySelectorAll('input[type="radio"]');
             
-            const radios = mainContainer.querySelectorAll('input[type="radio"]');
-            if (radios.length >= 4) {
-                if (e.key >= '1' && e.key <= '4') {
-                    const idx = parseInt(e.key) - 1;
-                    if (radios[idx]) {
-                        const parentLabel = radios[idx].closest('label');
-                        if (parentLabel) parentLabel.click();
-                        e.preventDefault();
-                    }
-                } else if (e.key === 'Enter') {
-                    const buttons = mainContainer.querySelectorAll('button');
-                    for (let btn of buttons) {
-                        if (btn.innerText.includes('回答する')) {
-                            btn.click();
-                            break;
-                        }
-                    }
+            if (e.key >= '1' && e.key <= '4') {
+                const idx = parseInt(e.key) - 1;
+                if (radios[idx]) {
+                    const parentLabel = radios[idx].closest('label');
+                    if (parentLabel) parentLabel.click();
                     e.preventDefault();
                 }
+            } else if (e.key === '5' || e.key === 'Enter') {
+                const buttons = doc.querySelectorAll('button');
+                for (let btn of buttons) {
+                    if (btn.innerText.includes('回答する')) {
+                        btn.click();
+                        break;
+                    }
+                }
+                e.preventDefault();
             }
         }
         window.parent.removeEventListener('keydown', window.parent._quizKeyHandler);
@@ -421,7 +420,7 @@ if app_mode == "クイズを解く":
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
       if st.button(
-          "次の問題へ ➡️", type="primary", key="next_btn_direct"
+          "次の問題へ [5]", type="primary", key="next_btn_direct"
       ):
         st.session_state.quiz_index = (st.session_state.quiz_index + 1) % len(
             quiz_pool
@@ -430,7 +429,7 @@ if app_mode == "クイズを解く":
         st.session_state.current_target = None
         st.rerun()
     with col2:
-      if st.button("🔀 リストを再シャッフル", key="reshuffle_btn"):
+      if st.button("🔀 再シャッフル [6]", key="reshuffle_btn"):
         if "quiz_pool" in st.session_state:
           del st.session_state.quiz_pool
         st.session_state.quiz_index = 0
@@ -444,20 +443,27 @@ if app_mode == "クイズを解く":
         st.session_state.current_target = None
         st.rerun()
 
-    # 解答後のキーボードショートカット (Enterで次の問題へ)
+    # 解答後のキーボードショートカット (5 or Enterで次の問題、6で再シャッフル)
     components.html(
         """
         <script>
         const doc = window.parent.document;
         function handleResultKey(e) {
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-            const mainContainer = doc.querySelector('.main');
-            if (!mainContainer) return;
             
-            if (e.key === 'Enter') {
-                const buttons = mainContainer.querySelectorAll('button');
+            if (e.key === '5' || e.key === 'Enter') {
+                const buttons = doc.querySelectorAll('button');
                 for (let btn of buttons) {
                     if (btn.innerText.includes('次の問題へ')) {
+                        btn.click();
+                        break;
+                    }
+                }
+                e.preventDefault();
+            } else if (e.key === '6') {
+                const buttons = doc.querySelectorAll('button');
+                for (let btn of buttons) {
+                    if (btn.innerText.includes('再シャッフル')) {
                         btn.click();
                         break;
                     }
