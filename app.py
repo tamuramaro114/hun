@@ -369,7 +369,7 @@ if app_mode == "クイズを解く":
             const mainContent = doc.querySelector('.main');
             const radios = mainContent ? mainContent.querySelectorAll('input[type="radio"]') : doc.querySelectorAll('input[type="radio"]');
             
-            if (e.key >= '1' && e.key <= '4') {
+            if (e.key >= '1' && e.key <= '6') {
                 const idx = parseInt(e.key) - 1;
                 if (radios[idx]) {
                     const parentLabel = radios[idx].closest('label');
