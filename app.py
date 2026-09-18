@@ -2,6 +2,7 @@ import os
 import random
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ファイルパスの設定
 WORDS_CSV = "words.csv"
@@ -206,7 +207,7 @@ if app_mode == "クイズを解く":
       ],
   )
 
-  # --- 新規追加：行番号による出題範囲指定 ---
+  # 行番号による出題範囲指定
   total_rows = len(words_df)
   st.sidebar.markdown("---")
   st.sidebar.markdown(f"**📝 CSV行番号の範囲指定** (全 {total_rows} 件)")
@@ -247,14 +248,12 @@ if app_mode == "クイズを解く":
 
   # クイズの出題プール作成
   if "quiz_pool" not in st.session_state:
-    # 行番号によるスライス (1始まりを0始まりインデックスに変換)
     target_df = words_df.copy()
     if use_range:
       s_idx = max(0, int(start_idx) - 1)
       e_idx = min(len(target_df), int(end_idx))
       target_df = target_df.iloc[s_idx:e_idx]
 
-    # 品詞フィルター
     if selected_pos != "すべて":
       filtered_words_df = target_df[target_df["part_of_speech"] == selected_pos]
     else:
@@ -342,20 +341,60 @@ if app_mode == "クイズを解く":
 
   # 未回答のとき
   if not st.session_state.is_answered:
-    # ラジオボタンで選択肢を保持
     user_choice = st.radio(
-        "選択肢:", choices, key=f"radio_{st.session_state.quiz_index}"
+        "選択肢 (キーボードの [1]～[4] でも選択できます):",
+        choices,
+        key=f"radio_{st.session_state.quiz_index}",
     )
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
-      # ボタン押下で確実に回答処理を実行
       if st.button("回答する", type="primary", key="submit_btn_direct"):
         st.session_state.is_answered = True
         st.session_state.selected_answer = user_choice
         is_correct = user_choice == target_japanese
         update_stats(target_korean, is_correct)
         st.rerun()
+
+    # キーボードショートカット (1〜4キーでラジオボタンを選択し、自動で回答ボタンを押す / Enterで回答)
+    components.html(
+        """
+        <script>
+        const doc = window.parent.document;
+        function handleKeyDown(e) {
+            // 入力フォーム等にフォーカスがある場合は無視
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+            
+            const radios = doc.querySelectorAll('input[type="radio"]');
+            if (radios.length >= 4) {
+                if (e.key >= '1' && e.key <= '4') {
+                    const idx = parseInt(e.key) - 1;
+                    if (radios[idx]) {
+                        // Streamlitのラベルをクリックしてラジオを選択状態にする
+                        const parentLabel = radios[idx].closest('label');
+                        if (parentLabel) parentLabel.click();
+                        e.preventDefault();
+                    }
+                } else if (e.key === 'Enter') {
+                    // 回答ボタンを探してクリック
+                    const buttons = doc.querySelectorAll('button');
+                    for (let btn of buttons) {
+                        if (btn.innerText.includes('回答する')) {
+                            btn.click();
+                            break;
+                        }
+                    }
+                    e.preventDefault();
+                }
+            }
+        }
+        window.parent.removeEventListener('keydown', window.parent._quizKeyHandler);
+        window.parent._quizKeyHandler = handleKeyDown;
+        window.parent.addEventListener('keydown', handleKeyDown);
+        </script>
+        """,
+        height=0,
+    )
 
   # 回答済みのとき
   else:
@@ -403,6 +442,32 @@ if app_mode == "クイズを解く":
         st.session_state.is_answered = False
         st.session_state.current_target = None
         st.rerun()
+
+    # 解答後のキーボードショートカット (Enterで次の問題へ)
+    components.html(
+        """
+        <script>
+        const doc = window.parent.document;
+        function handleResultKey(e) {
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+            if (e.key === 'Enter') {
+                const buttons = doc.querySelectorAll('button');
+                for (let btn of buttons) {
+                    if (btn.innerText.includes('次の問題へ')) {
+                        btn.click();
+                        break;
+                    }
+                }
+                e.preventDefault();
+            }
+        }
+        window.parent.removeEventListener('keydown', window.parent._resultKeyHandler);
+        window.parent._resultKeyHandler = handleResultKey;
+        window.parent.addEventListener('keydown', handleResultKey);
+        </script>
+        """,
+        height=0,
+    )
 
 elif app_mode == "単語・成績一覧CSV":
   st.subheader("📊 単語リスト & 成績・正答率一覧")
