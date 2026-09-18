@@ -342,7 +342,7 @@ if app_mode == "クイズを解く":
   # 未回答のとき
   if not st.session_state.is_answered:
     user_choice = st.radio(
-        "選択肢 (キーボードの [1]～[4] でも選択できます):",
+        "選択肢 (キーボードの [1]～[4] で選択):",
         choices,
         key=f"radio_{st.session_state.quiz_index}",
     )
@@ -356,28 +356,29 @@ if app_mode == "クイズを解く":
         update_stats(target_korean, is_correct)
         st.rerun()
 
-    # キーボードショートカット (1〜4キーでラジオボタンを選択し、自動で回答ボタンを押す / Enterで回答)
+    # キーボードショートカット：メイン画面のラジオボタン（選択肢）専用に1〜4を割り当て
     components.html(
         """
         <script>
         const doc = window.parent.document;
         function handleKeyDown(e) {
-            // 入力フォーム等にフォーカスがある場合は無視
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
             
-            const radios = doc.querySelectorAll('input[type="radio"]');
+            // メインコンテンツエリア内にあるラジオボタンのみを対象にする
+            const mainContainer = doc.querySelector('.main');
+            if (!mainContainer) return;
+            
+            const radios = mainContainer.querySelectorAll('input[type="radio"]');
             if (radios.length >= 4) {
                 if (e.key >= '1' && e.key <= '4') {
                     const idx = parseInt(e.key) - 1;
                     if (radios[idx]) {
-                        // Streamlitのラベルをクリックしてラジオを選択状態にする
                         const parentLabel = radios[idx].closest('label');
                         if (parentLabel) parentLabel.click();
                         e.preventDefault();
                     }
                 } else if (e.key === 'Enter') {
-                    // 回答ボタンを探してクリック
-                    const buttons = doc.querySelectorAll('button');
+                    const buttons = mainContainer.querySelectorAll('button');
                     for (let btn of buttons) {
                         if (btn.innerText.includes('回答する')) {
                             btn.click();
@@ -450,8 +451,11 @@ if app_mode == "クイズを解く":
         const doc = window.parent.document;
         function handleResultKey(e) {
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+            const mainContainer = doc.querySelector('.main');
+            if (!mainContainer) return;
+            
             if (e.key === 'Enter') {
-                const buttons = doc.querySelectorAll('button');
+                const buttons = mainContainer.querySelectorAll('button');
                 for (let btn of buttons) {
                     if (btn.innerText.includes('次の問題へ')) {
                         btn.click();
