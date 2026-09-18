@@ -183,8 +183,49 @@ if words_df.empty:
   st.stop()
 
 # サイドバー：モード選択・設定
-st.sidebar.header("⚙️ 設定 & モード")
-app_mode = st.sidebar.radio("メニュー", ["クイズを解く", "単語・成績一覧CSV"])
+st.sidebar.header("⚙️設定 & モード")
+app_mode = st.sidebar.radio(
+    "メニュー", ["クイズを解く", "単語・成績一覧CSV"], key="app_mode_radio"
+)
+
+# グローバルなキーボードショートカット (1, 2でメニュー切り替え)
+components.html(
+    """
+    <script>
+    const doc = window.parent.document;
+    function handleGlobalKeyDown(e) {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        
+        if (e.key === '1' || e.key === '2') {
+            const mainContent = doc.querySelector('.main');
+            const sideBar = doc.querySelector('[data-testid="stSidebar"]');
+            const targetArea = sideBar || mainContent || doc;
+            const radios = targetArea.querySelectorAll('input[type="radio"]');
+            
+            let menuRadios = [];
+            for (let r of radios) {
+                const text = r.parentElement ? r.parentElement.innerText : "";
+                if (text.includes("クイズを解く") || text.includes("単語・成績一覧CSV")) {
+                    menuRadios.push(r);
+                }
+            }
+            if (menuRadios.length >= 2) {
+                const idx = parseInt(e.key) - 1;
+                if (menuRadios[idx]) {
+                    const parentLabel = menuRadios[idx].closest('label');
+                    if (parentLabel) parentLabel.click();
+                    e.preventDefault();
+                }
+            }
+        }
+    }
+    window.parent.removeEventListener('keydown', window.parent._globalKeyHandler);
+    window.parent._globalKeyHandler = handleGlobalKeyDown;
+    window.parent.addEventListener('keydown', handleGlobalKeyDown);
+    </script>
+    """,
+    height=0,
+)
 
 if app_mode == "クイズを解く":
   st.sidebar.subheader("出題範囲・順番の設定")
@@ -318,8 +359,8 @@ if app_mode == "クイズを解く":
       f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
   )
   st.caption(
-      "💡 **キーボード操作**: `3`～`6`キーで選択、`7` または `Enter`"
-      " キーで回答／次へ、払拭時は `8`キー等"
+      "💡 **キーボード操作**: `1`･`2`キーでメニュー切替、`3`～`6`キーで選択、`7`"
+      " または `Enter` キーで回答／次へ"
   )
 
   # 4択の選択肢作成
@@ -351,14 +392,16 @@ if app_mode == "クイズを解く":
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
-      if st.button("回答する [7 / Enter]", type="primary", key="submit_btn_direct"):
+      if st.button(
+          "回答する [7 / Enter]", type="primary", key="submit_btn_direct"
+      ):
         st.session_state.is_answered = True
         st.session_state.selected_answer = user_choice
         is_correct = user_choice == target_japanese
         update_stats(target_korean, is_correct)
         st.rerun()
 
-    # キーボードショートカット (3〜6で選択肢、7 or Enterで回答)
+    # クイズ解答時のキーボードショートカット (3〜6で選択肢、7 or Enterで回答)
     components.html(
         """
         <script>
