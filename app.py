@@ -189,6 +189,15 @@ app_mode = st.sidebar.radio("メニュー", ["クイズを解く", "単語・成
 if app_mode == "クイズを解く":
   st.sidebar.subheader("出題範囲・順番の設定")
 
+  quiz_direction = st.sidebar.selectbox(
+      "出題形式",
+      [
+          "韓国語を見て日本語を選ぶ (K -> J)",
+          "日本語を見て韓国語を選ぶ (J -> K)",
+          "ランダム (両方ミックス)",
+      ],
+  )
+
   all_pos = (
       ["すべて"] + list(words_df["part_of_speech"].dropna().unique())
       if "part_of_speech" in words_df.columns
@@ -232,7 +241,7 @@ if app_mode == "クイズを解く":
       st.sidebar.error("開始行は終了行以下にしてください。")
 
   # 条件が変わったときにプールをリセットするためのキー
-  current_settings_key = f"{selected_pos}_{order_mode}_{use_range}_{start_idx}_{end_idx}"
+  current_settings_key = f"{quiz_direction}_{selected_pos}_{order_mode}_{use_range}_{start_idx}_{end_idx}"
   if st.session_state.get("last_settings_key") != current_settings_key:
     st.session_state.last_settings_key = current_settings_key
     for key in [
@@ -241,26 +250,30 @@ if app_mode == "クイズを解く":
         "is_answered",
         "current_target",
         "selected_answer",
+        "current_choices",
     ]:
       if key in st.session_state:
         del st.session_state[key]
     st.rerun()
 
+  # 範囲ベースの対象データフレーム作成（ダミー選択肢もこの範囲内から選ぶため共通で使用）
+  base_target_df = words_df.copy()
+  if use_range:
+    s_idx = max(0, int(start_idx) - 1)
+    e_idx = min(len(base_target_df), int(end_idx))
+    base_target_df = base_target_df.iloc[s_idx:e_idx]
+
+  if selected_pos != "すべて":
+    pool_source_df = base_target_df[
+        base_target_df["part_of_speech"] == selected_pos
+    ]
+  else:
+    pool_source_df = base_target_df
+
   # クイズの出題プール作成
   if "quiz_pool" not in st.session_state:
-    target_df = words_df.copy()
-    if use_range:
-      s_idx = max(0, int(start_idx) - 1)
-      e_idx = min(len(target_df), int(end_idx))
-      target_df = target_df.iloc[s_idx:e_idx]
-
-    if selected_pos != "すべて":
-      filtered_words_df = target_df[target_df["part_of_speech"] == selected_pos]
-    else:
-      filtered_words_df = target_df
-
     stats_df = load_stats()
-    merged_df = pd.merge(filtered_words_df, stats_df, on="korean", how="left")
+    merged_df = pd.merge(pool_source_df, stats_df, on="korean", how="left")
     merged_df["accuracy"] = merged_df["accuracy"].fillna(0.0)
     merged_df["recent_accuracy"] = merged_df["recent_accuracy"].fillna(0.0)
 
@@ -311,30 +324,57 @@ if app_mode == "クイズを解く":
   target_japanese = str(current_row["japanese"])
   target_reading = str(current_row["reading"])
 
+  # 出題方向の決定（個々の問題ごと、または全体）
+  if "current_q_type" not in st.session_state or st.session_state.get(
+      "current_target"
+  ) != target_korean:
+    if quiz_direction == "韓国語を見て日本語を選ぶ (K -> J)":
+      st.session_state.current_q_type = "K2J"
+    elif quiz_direction == "日本語を見て韓国語を選ぶ (J -> K)":
+      st.session_state.current_q_type = "J2K"
+    else:
+      st.session_state.current_q_type = random.choice(["K2J", "J2K"])
+
+  q_type = st.session_state.current_q_type
+
   st.subheader(
       f"問題 {st.session_state.quiz_index + 1} / {len(quiz_pool)}"
   )
-  st.markdown(
-      f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
-  )
+  if q_type == "K2J":
+    st.markdown(
+        f"### 次の韓国語の意味として正しいものを選んでください: **`{target_korean}`**"
+    )
+    correct_val = target_japanese
+  else:
+    st.markdown(
+        f"### 次の日本語の韓国語として正しいものを選んでください: **`{target_japanese}`**"
+    )
+    correct_val = target_korean
+
   st.caption(
       "💡 **キーボード操作**: `1`～`4`キーで選択、`7` または `Enter`"
       " キーで回答／次へ"
   )
 
-  # 4択の選択肢作成
+  # 4択の選択肢作成（範囲内からダミーを選択）
   if "current_choices" not in st.session_state or st.session_state.get(
       "current_target"
   ) != target_korean:
-    other_words = words_df[words_df["japanese"] != target_japanese]
+    col_name = "japanese" if q_type == "K2J" else "korean"
+
+    other_words = pool_source_df[pool_source_df[col_name] != correct_val]
     if len(other_words) >= 3:
-      dummies = other_words["japanese"].sample(n=3).tolist()
+      dummies = other_words[col_name].sample(n=3).tolist()
     else:
-      dummies = other_words["japanese"].tolist()
+      # 範囲内のプールが小さすぎる場合は全体から補う
+      fallback_df = words_df[words_df[col_name] != correct_val]
+      dummies = fallback_df[col_name].sample(
+          n=min(3, len(fallback_df))
+      ).tolist()
       while len(dummies) < 3:
         dummies.append("ダミー")
 
-    choices = dummies + [target_japanese]
+    choices = dummies + [correct_val]
     random.shuffle(choices)
     st.session_state.current_choices = choices
     st.session_state.current_target = target_korean
@@ -354,7 +394,7 @@ if app_mode == "クイズを解く":
       if st.button("回答する [7 / Enter]", type="primary", key="submit_btn_direct"):
         st.session_state.is_answered = True
         st.session_state.selected_answer = user_choice
-        is_correct = user_choice == target_japanese
+        is_correct = user_choice == correct_val
         update_stats(target_korean, is_correct)
         st.rerun()
 
@@ -407,14 +447,16 @@ if app_mode == "クイズを解く":
         key=f"disabled_radio_{st.session_state.quiz_index}",
     )
 
-    if st.session_state.selected_answer == target_japanese:
+    if st.session_state.selected_answer == correct_val:
       st.success("🎉 正解です！")
     else:
       st.error(
-          f"❌ 残念！不正解です。正解は **「{target_japanese}」** です。"
+          f"❌ 残念！不正解です。正解は **「{correct_val}」** です。"
       )
 
-    st.info(f"📖 **解説**: `{target_korean}` の読みは **[{target_reading}]** です。")
+    st.info(
+        f"📖 **解説**: 韓国語 **`{target_korean}`** (読み: **[{target_reading}]**) の意味は **「{target_japanese}」** です。"
+    )
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
